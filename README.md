@@ -1315,9 +1315,23 @@ audio{display:none}
 
     <!-- Controls -->
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <button class="btn-gold" id="reminder-start-btn" onclick="startPeriodicReminder()">🔔 تفعيل</button>
-      <button class="btn-gold" id="reminder-stop-btn" onclick="stopPeriodicReminder()" style="display:none;background:rgba(200,50,50,0.2);border-color:rgba(200,50,50,0.5);color:#ff8080">⏹ إيقاف</button>
-      <button onclick="testDhikrNotification()" style="background:transparent;border:1px solid rgba(200,168,75,0.4);color:var(--gold-pale);padding:7px 14px;border-radius:8px;cursor:pointer;font-family:'Cairo',sans-serif;font-size:13px">🔔 اختبار الإشعار</button>
+      <!-- اختيار الصوت -->
+      <div style="width:100%;margin-bottom:10px">
+        <div style="font-size:13px;color:var(--gold-pale);margin-bottom:6px">🎙 اختر الصوت:</div>
+        <select id="tts-voice-select" onchange="setSelectedVoice(this.value)" style="
+          width:100%;background:var(--green-dark);border:1px solid var(--gold);
+          color:var(--cream);padding:8px 12px;border-radius:8px;
+          font-family:'Cairo',sans-serif;font-size:13px;cursor:pointer;direction:rtl;
+        ">
+          <option value="">جاري تحميل الأصوات...</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <button class="btn-gold" id="reminder-start-btn" onclick="startPeriodicReminder()">🔔 تفعيل</button>
+        <button class="btn-gold" id="reminder-stop-btn" onclick="stopPeriodicReminder()" style="display:none;background:rgba(200,50,50,0.2);border-color:rgba(200,50,50,0.5);color:#ff8080">⏹ إيقاف</button>
+        <button onclick="testSoundNow()" style="background:transparent;border:1px solid rgba(200,168,75,0.4);color:var(--gold-pale);padding:7px 12px;border-radius:8px;cursor:pointer;font-family:'Cairo',sans-serif;font-size:13px">🔊 اختبار</button>
+        <button onclick="testDhikrNotification()" style="background:transparent;border:1px solid rgba(200,168,75,0.4);color:var(--gold-pale);padding:7px 12px;border-radius:8px;cursor:pointer;font-family:'Cairo',sans-serif;font-size:13px">🔔 إشعار</button>
+      </div>
       <div id="reminder-status" style="font-size:13px;color:var(--green-pale);width:100%;margin-top:6px"></div>
       <div style="font-size:12px;color:var(--cream-dark);opacity:.6;margin-top:4px;width:100%">
         ⚠️ يجب السماح بالإشعارات — الصوت يعمل عند فتح التطبيق فقط، والإشعار يظهر دائماً
@@ -3647,7 +3661,7 @@ function showToast(msg){
 // ==================== تسجيل Service Worker ====================
 if('serviceWorker' in navigator){
   try{
-    navigator.serviceWorker.register('/sw.js').then(function(reg){
+    navigator.serviceWorker.register('/sw.js?v=5&t=20260523').then(function(reg){
       if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
       reg.addEventListener('updatefound', function(){
         var sw = reg.installing;
@@ -3903,7 +3917,8 @@ function changeQuranFont(delta){
 
 
 // ==================== التذكير الدوري بالأذكار ====================
-var reminderInterval = 30; // minutes
+var reminderInterval = 30;
+var audioUnlocked = false; // minutes
 var reminderSW = null;
 var reminderActive = false;
 
@@ -3920,6 +3935,7 @@ const DEFAULT_DHIKR = [
 ];
 
 function initReminderUI(){
+  try{ setTimeout(loadVoicesList, 800); }catch(e){}
   var list = document.getElementById('reminder-dhikr-list');
   if(!list) return;
   list.innerHTML = DEFAULT_DHIKR.map(function(d,i){
@@ -3951,13 +3967,19 @@ function startPeriodicReminder(){
   var selected = getSelectedDhikr();
   if(selected.length === 0){ showToast('اختر ذكراً واحداً على الأقل'); return; }
 
-  // Request notification permission
+  // شغّل صوتاً صامتاً الآن لفتح إذن الصوت
+  try {
+    var testU = new SpeechSynthesisUtterance('.');
+    testU.volume = 0.01;
+    testU.rate = 10;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(testU);
+    audioUnlocked = true;
+  } catch(e){}
+
+  // اطلب إذن الإشعارات
   if('Notification' in window){
     Notification.requestPermission().then(function(perm){
-      if(perm !== 'granted'){
-        showToast('يجب السماح بالإشعارات لعمل التذكير');
-        return;
-      }
       doStartReminder(selected);
     });
   } else {
@@ -4025,8 +4047,8 @@ function updateReminderUI(active){
 
 function speakText(text){
   if(!('speechSynthesis' in window)) return;
-  // إلغاء أي صوت سابق
   window.speechSynthesis.cancel();
+  audioUnlocked = true;
   var u = new SpeechSynthesisUtterance(text);
   u.lang = 'ar-SA';
   u.rate = 0.78;
@@ -4331,6 +4353,148 @@ function testDhikrNotification(){
     }
     showToast('تم إرسال إشعار تجريبي — تحقق من إشعارات جهازك');
   });
+}
+
+
+// فتح إذن الصوت - يجب استدعاؤها بعد تفاعل المستخدم
+function unlockAudio(){
+  if(audioUnlocked) return Promise.resolve();
+  return new Promise(function(resolve){
+    var u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    u.onend = function(){ audioUnlocked = true; resolve(); };
+    u.onerror = function(){ audioUnlocked = true; resolve(); };
+    window.speechSynthesis.speak(u);
+    setTimeout(function(){ audioUnlocked = true; resolve(); }, 500);
+  });
+}
+
+
+function testSoundNow(){
+  audioUnlocked = true;
+  var dhikr = DEFAULT_DHIKR[0] || {text:'سبحان الله وبحمده سبحان الله العظيم', label:'التسبيح'};
+  
+  // جرّب TTS أولاً
+  if('speechSynthesis' in window){
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(dhikr.text);
+    u.lang = 'ar-SA';
+    u.rate = 0.78;
+    u.pitch = 0;
+    u.volume = 1;
+    // جرّب أي صوت متاح
+    var voices = window.speechSynthesis.getVoices();
+    var arVoice = voices.find(function(v){ return v.lang.startsWith('ar'); })
+                || voices.find(function(v){ return v.lang==='ar-SA'; });
+    if(arVoice){ u.voice = arVoice; }
+    u.onstart = function(){ showToast('🔊 الصوت يعمل!'); };
+    u.onerror = function(){ playBeep(); };
+    window.speechSynthesis.speak(u);
+    setTimeout(function(){
+      if(!window.speechSynthesis.speaking && !window.speechSynthesis.pending){
+        playBeep();
+      }
+    }, 1500);
+  } else {
+    playBeep();
+  }
+  showToast('🌿 ' + dhikr.text);
+}
+
+// نبرة صوتية بديلة عند عدم وجود صوت عربي
+function playBeep(){
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(440, ctx.currentTime);
+    osc.frequency.setValueAtTime(528, ctx.currentTime + 0.3);
+    osc.frequency.setValueAtTime(396, ctx.currentTime + 0.6);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 1.2);
+    showToast('🔔 تنبيه صوتي (لا يوجد صوت عربي على الجهاز)');
+  } catch(e){
+    showToast('⚠️ تعذر تشغيل الصوت');
+  }
+}
+
+
+// ==================== اختيار الصوت ====================
+var selectedVoiceName = '';
+
+function loadVoicesList(){
+  try {
+    var sel = document.getElementById('tts-voice-select');
+    if(!sel || !('speechSynthesis' in window)) return;
+    
+    var voices = window.speechSynthesis.getVoices();
+    if(voices.length === 0){
+      window.speechSynthesis.onvoiceschanged = function(){
+        loadVoicesList();
+      };
+      return;
+    }
+    
+    sel.innerHTML = '';
+    var arVoices = voices.filter(function(v){ return v.lang.startsWith('ar'); });
+    var otherVoices = voices.filter(function(v){ return !v.lang.startsWith('ar'); });
+    
+    if(arVoices.length > 0){
+      var grp1 = document.createElement('optgroup');
+      grp1.label = '🌙 أصوات عربية';
+      arVoices.forEach(function(v){
+        var opt = document.createElement('option');
+        opt.value = v.name;
+        opt.textContent = v.name + ' (' + v.lang + ')';
+        var maleNames = ['Hamed','Naayf','Majed','Male','male','Wavenet-D','Wavenet-B'];
+        if(maleNames.some(function(n){ return v.name.includes(n); })){
+          opt.selected = true;
+          selectedVoiceName = v.name;
+        }
+        grp1.appendChild(opt);
+      });
+      sel.appendChild(grp1);
+    }
+    
+    if(!selectedVoiceName && arVoices.length > 0){
+      selectedVoiceName = arVoices[0].name;
+      sel.value = selectedVoiceName;
+    }
+    
+    var grp2 = document.createElement('optgroup');
+    grp2.label = '🌐 أصوات أخرى';
+    otherVoices.slice(0,8).forEach(function(v){
+      var opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = v.name + ' (' + v.lang + ')';
+      grp2.appendChild(opt);
+    });
+    sel.appendChild(grp2);
+  } catch(e) {
+    console.log('loadVoicesList error:', e);
+  }
+}
+
+function setSelectedVoice(name){
+  selectedVoiceName = name;
+  showToast('تم اختيار: ' + name);
+  // اختبار الصوت المختار
+  var voices = window.speechSynthesis.getVoices();
+  var v = voices.find(function(v){ return v.name === name; });
+  if(v){
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance('سبحان الله');
+    u.voice = v;
+    u.lang = v.lang;
+    u.rate = 0.8;
+    u.pitch = 0;
+    u.volume = 1;
+    window.speechSynthesis.speak(u);
+  }
 }
 
 </script>
