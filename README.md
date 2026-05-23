@@ -3991,20 +3991,20 @@ function doStartReminder(selected){
 
 // تشغيل تنبيه الذكر (صوت + إشعار)
 function playDhikrAlert(dhikr){
-  // إشعار مرئي
-  if(Notification.permission === 'granted'){
-    new Notification('🌿 نور القرآن — ذكر', {
+  // إشعار مرئي على الشاشة
+  if('Notification' in window && Notification.permission === 'granted'){
+    new Notification('🌿 نور القرآن — ' + (dhikr.label || 'ذكر'), {
       body: dhikr.text,
       tag: 'dhikr-alert',
       renotify: true,
       vibrate: [300, 100, 300]
     });
   }
-  // صوت TTS (فقط عند فتح التطبيق)
+  // صوت TTS عند فتح التطبيق
   if(!document.hidden){
     speakText(dhikr.text);
   }
-  showToast('🌿 ' + dhikr.label);
+  showToast('🌿 ' + (dhikr.label || ''));
 }
 
 function updateReminderUI(active){
@@ -4025,6 +4025,7 @@ function updateReminderUI(active){
 
 function speakText(text){
   if(!('speechSynthesis' in window)) return;
+  // إلغاء أي صوت سابق
   window.speechSynthesis.cancel();
   var u = new SpeechSynthesisUtterance(text);
   u.lang = 'ar-SA';
@@ -4040,13 +4041,24 @@ function speakText(text){
     if(!arVoice) arVoice = voices.find(function(v){return v.lang==='ar-SA';});
     if(!arVoice) arVoice = voices.find(function(v){return v.lang.startsWith('ar');});
     if(arVoice) u.voice = arVoice;
+    // حل مشكلة Chrome الذي يوقف TTS بعد فترة
+    var resumeTimer = setInterval(function(){
+      if(!window.speechSynthesis.speaking){ clearInterval(resumeTimer); return; }
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 10000);
+    u.onend = function(){ clearInterval(resumeTimer); };
+    u.onerror = function(){ clearInterval(resumeTimer); };
     window.speechSynthesis.speak(u);
   }
-  // Voices may not be loaded yet
   if(window.speechSynthesis.getVoices().length > 0){
     doSpeak();
   } else {
     window.speechSynthesis.onvoiceschanged = function(){ doSpeak(); };
+    // محاولة بعد ثانية إذا لم تُحمّل الأصوات
+    setTimeout(function(){
+      if(window.speechSynthesis.getVoices().length > 0) doSpeak();
+    }, 1000);
   }
 }
 
